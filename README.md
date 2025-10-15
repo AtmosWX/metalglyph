@@ -10,6 +10,7 @@ Fast, simple 2D text rendering for Metal 4 through [`objc2`](https://github.com/
 A fork of [`glyphon`], with the [`wgpu`] renderer swapped out for a Metal 4 renderer.
 
 [`glyphon`]: https://github.com/grovesNL/glyphon
+[`wgpu`]: https://github.com/gfx-rs/wgpu
 
 ## License
 This project is licensed under either [Apache License, Version 2.0](LICENSE-APACHE), [zlib License](LICENSE-ZLIB), or [MIT License](LICENSE-MIT), at your option.
