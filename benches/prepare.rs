@@ -1,9 +1,9 @@
 use cosmic_text::{Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache};
 use criterion::{criterion_group, criterion_main, Criterion};
-use glyphon::{
+use metalglyph::{
     Cache, ColorMode, Resolution, TextArea, TextAtlas, TextBounds, TextRenderer, Viewport, Weight,
 };
-use wgpu::{MultisampleState, TextureFormat};
+use objc2_metal::MTLPixelFormat;
 
 mod state;
 
@@ -17,28 +17,23 @@ fn run_bench(ctx: &mut Criterion) {
     let mut font_system = FontSystem::new();
     let mut swash_cache = SwashCache::new();
     let cache = Cache::new(&state.device);
-    let mut viewport = Viewport::new(&state.device, &cache);
+    let mut viewport = Viewport::new(&state.device);
     let mut atlas = TextAtlas::with_color_mode(
         &state.device,
-        &state.queue,
         &cache,
-        TextureFormat::Bgra8Unorm,
+        MTLPixelFormat::BGRA8Unorm,
         ColorMode::Web,
     );
-    let mut text_renderer =
-        TextRenderer::new(&mut atlas, &state.device, MultisampleState::default(), None);
+    let mut text_renderer = TextRenderer::new(&mut atlas, &state.device);
 
     let attrs = Attrs::new()
         .family(Family::SansSerif)
         .weight(Weight::NORMAL);
     let shaping = Shaping::Advanced;
-    viewport.update(
-        &state.queue,
-        Resolution {
-            width: 1000,
-            height: 1000,
-        },
-    );
+    viewport.update(Resolution {
+        width: 1000,
+        height: 1000,
+    });
 
     for (test_name, text_areas) in &[
         (
@@ -64,7 +59,7 @@ fn run_bench(ctx: &mut Criterion) {
                 .collect(),
         ),
     ] {
-        let buffers: Vec<glyphon::Buffer> = text_areas
+        let buffers: Vec<Buffer> = text_areas
             .iter()
             .copied()
             .map(|s| {
@@ -96,11 +91,10 @@ fn run_bench(ctx: &mut Criterion) {
                     })
                     .collect();
 
-                criterion::black_box(
+                std::hint::black_box(
                     text_renderer
                         .prepare(
                             &state.device,
-                            &state.queue,
                             &mut font_system,
                             &mut atlas,
                             &viewport,

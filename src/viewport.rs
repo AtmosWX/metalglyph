@@ -1,6 +1,7 @@
-use crate::{Cache, Params, Resolution};
-use std::{mem, slice};
-use wgpu::{BindGroup, Buffer, BufferDescriptor, BufferUsages, Device, Queue};
+use crate::{Params, Resolution};
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
+use std::{mem, ptr::NonNull};
 
 /// Controls the visible area of all text for a given renderer. Any text outside of the visible
 /// area will be clipped.
@@ -11,48 +12,40 @@ use wgpu::{BindGroup, Buffer, BufferDescriptor, BufferUsages, Device, Queue};
 #[derive(Debug)]
 pub struct Viewport {
     params: Params,
-    params_buffer: Buffer,
-    pub(crate) bind_group: BindGroup,
+    pub(crate) buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
 }
 
 impl Viewport {
-    /// Creates a new `Viewport` with the given `device` and `cache`.
-    pub fn new(device: &Device, cache: &Cache) -> Self {
+    /// Creates a new `Viewport` with the given `device`.
+    pub fn new(device: &Retained<ProtocolObject<dyn MTLDevice>>) -> Self {
         let params = Params {
             screen_resolution: Resolution {
                 width: 0,
                 height: 0,
             },
-            _pad: [0, 0],
         };
 
-        let params_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("glyphon params"),
-            size: mem::size_of::<Params>() as u64,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let buffer = device
+            .newBufferWithLength_options(
+                mem::size_of::<Params>(),
+                MTLResourceOptions::StorageModeShared,
+            )
+            .unwrap();
 
-        let bind_group = cache.create_uniforms_bind_group(device, &params_buffer);
-
-        Self {
-            params,
-            params_buffer,
-            bind_group,
-        }
+        Self { params, buffer }
     }
 
     /// Updates the `Viewport` with the given `resolution`.
-    pub fn update(&mut self, queue: &Queue, resolution: Resolution) {
+    pub fn update(&mut self, resolution: Resolution) {
         if self.params.screen_resolution != resolution {
             self.params.screen_resolution = resolution;
 
-            queue.write_buffer(&self.params_buffer, 0, unsafe {
-                slice::from_raw_parts(
-                    &self.params as *const Params as *const u8,
-                    mem::size_of::<Params>(),
-                )
-            });
+            unsafe {
+                self.buffer.contents().copy_from(
+                    NonNull::from(&self.params).cast(),
+                    std::mem::size_of::<Params>(),
+                );
+            }
         }
     }
 

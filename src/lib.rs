@@ -1,6 +1,6 @@
-//! Glyphon provides a simple way to render 2D text with [wgpu], [cosmic-text] and [etagere].
+//! metalglyph is a fork of [glyphon] that provides a simple way to render 2D text with Metal 4, [cosmic-text] and [etagere].
 //!
-//! [wpgu]: https://github.com/gfx-rs/wgpu
+//! [glyphon]: https://github.com/grovesNL/glyphon
 //! [cosmic-text]: https://github.com/pop-os/cosmic-text
 //! [etagere]: https://github.com/nical/etagere
 
@@ -75,7 +75,6 @@ pub struct Resolution {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Params {
     screen_resolution: Resolution,
-    _pad: [u32; 2],
 }
 
 /// Controls the visible area of the text. Any text outside of the visible area will be clipped.

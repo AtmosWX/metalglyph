@@ -1,55 +1,88 @@
 use crate::{
     custom_glyph::CustomGlyphCacheKey, ColorMode, ContentType, FontSystem, GlyphDetails,
     GlyphToRender, GpuCacheStatus, PrepareError, RasterizeCustomGlyphRequest,
-    RasterizedCustomGlyph, RenderError, SwashCache, SwashContent, TextArea, TextAtlas, Viewport,
+    RasterizedCustomGlyph, SwashCache, SwashContent, TextArea, TextAtlas, Viewport,
 };
 use cosmic_text::{Color, SubpixelBin};
-use std::slice;
-use wgpu::{
-    Buffer, BufferDescriptor, BufferUsages, DepthStencilState, Device, Extent3d, MultisampleState,
-    Origin3d, Queue, RenderPass, RenderPipeline, TexelCopyBufferLayout, TexelCopyTextureInfo,
-    TextureAspect, COPY_BUFFER_ALIGNMENT,
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_metal::{
+    MTL4ArgumentTable, MTL4ArgumentTableDescriptor, MTL4CompilerDescriptor,
+    MTL4RenderCommandEncoder, MTLBuffer, MTLDevice, MTLOrigin, MTLPrimitiveType, MTLRegion,
+    MTLRenderPipelineState, MTLRenderStages, MTLResidencySet, MTLResidencySetDescriptor,
+    MTLResourceOptions, MTLSize, MTLTexture as _,
 };
+use std::{ptr::NonNull, slice};
+
+const COPY_BUFFER_ALIGNMENT: u64 = 4;
 
 /// A text renderer that uses cached glyphs to render text into an existing render pass.
 pub struct TextRenderer {
-    vertex_buffer: Buffer,
+    vertex_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
     vertex_buffer_size: u64,
-    pipeline: RenderPipeline,
+    residency_set: Retained<ProtocolObject<dyn MTLResidencySet>>,
+    pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
+    argument_table: Retained<ProtocolObject<dyn MTL4ArgumentTable>>,
     glyph_vertices: Vec<GlyphToRender>,
 }
 
 impl TextRenderer {
+    // TODO: Accept multisample and depth_stencil states.
     /// Creates a new `TextRenderer`.
     pub fn new(
         atlas: &mut TextAtlas,
-        device: &Device,
-        multisample: MultisampleState,
-        depth_stencil: Option<DepthStencilState>,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
+        // multisample: MultisampleState,
+        // depth_stencil: Option<DepthStencilState>,
     ) -> Self {
         let vertex_buffer_size = next_copy_buffer_size(4096);
-        let vertex_buffer = device.create_buffer(&BufferDescriptor {
-            label: Some("glyphon vertices"),
-            size: vertex_buffer_size,
-            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
 
-        let pipeline = atlas.get_or_create_pipeline(device, multisample, depth_stencil);
+        let vertex_buffer = device
+            .newBufferWithLength_options(
+                vertex_buffer_size as usize,
+                MTLResourceOptions::StorageModeShared,
+            )
+            .unwrap();
+
+        let compiler = device
+            .newCompilerWithDescriptor_error(&MTL4CompilerDescriptor::new())
+            .expect("Failed to create MTLCompiler");
+
+        let residency_set = device
+            .newResidencySetWithDescriptor_error(&MTLResidencySetDescriptor::new())
+            .expect("Failed to create MTLResidencySet");
+
+        residency_set.addAllocation(vertex_buffer.as_ref());
+        residency_set.commit();
+
+        let pipeline = atlas.get_or_create_pipeline(&compiler);
+
+        let argument_table_descriptor = MTL4ArgumentTableDescriptor::new();
+        argument_table_descriptor.setMaxBufferBindCount(2);
+        argument_table_descriptor.setMaxTextureBindCount(2);
+
+        let argument_table = device
+            .newArgumentTableWithDescriptor_error(&argument_table_descriptor)
+            .expect("Failed to create MTLArgumentTable");
 
         Self {
             vertex_buffer,
             vertex_buffer_size,
             pipeline,
+            residency_set,
+            argument_table,
             glyph_vertices: Vec::new(),
         }
+    }
+
+    /// Returns the residency set used by this text renderer.
+    pub fn residency_set(&self) -> &Retained<ProtocolObject<dyn MTLResidencySet>> {
+        &self.residency_set
     }
 
     /// Prepares all of the provided text areas for rendering.
     pub fn prepare<'a>(
         &mut self,
-        device: &Device,
-        queue: &Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         font_system: &mut FontSystem,
         atlas: &mut TextAtlas,
         viewport: &Viewport,
@@ -58,7 +91,6 @@ impl TextRenderer {
     ) -> Result<(), PrepareError> {
         self.prepare_with_depth_and_custom(
             device,
-            queue,
             font_system,
             atlas,
             viewport,
@@ -72,8 +104,7 @@ impl TextRenderer {
     /// Prepares all of the provided text areas for rendering.
     pub fn prepare_with_depth<'a>(
         &mut self,
-        device: &Device,
-        queue: &Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         font_system: &mut FontSystem,
         atlas: &mut TextAtlas,
         viewport: &Viewport,
@@ -83,7 +114,6 @@ impl TextRenderer {
     ) -> Result<(), PrepareError> {
         self.prepare_with_depth_and_custom(
             device,
-            queue,
             font_system,
             atlas,
             viewport,
@@ -97,8 +127,7 @@ impl TextRenderer {
     /// Prepares all of the provided text areas for rendering.
     pub fn prepare_with_custom<'a>(
         &mut self,
-        device: &Device,
-        queue: &Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         font_system: &mut FontSystem,
         atlas: &mut TextAtlas,
         viewport: &Viewport,
@@ -108,7 +137,6 @@ impl TextRenderer {
     ) -> Result<(), PrepareError> {
         self.prepare_with_depth_and_custom(
             device,
-            queue,
             font_system,
             atlas,
             viewport,
@@ -122,8 +150,7 @@ impl TextRenderer {
     /// Prepares all of the provided text areas for rendering.
     pub fn prepare_with_depth_and_custom<'a>(
         &mut self,
-        device: &Device,
-        queue: &Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         font_system: &mut FontSystem,
         atlas: &mut TextAtlas,
         viewport: &Viewport,
@@ -182,7 +209,6 @@ impl TextRenderer {
                     cache_key,
                     atlas,
                     device,
-                    queue,
                     cache,
                     font_system,
                     text_area.scale,
@@ -227,8 +253,9 @@ impl TextRenderer {
             let is_run_visible = |run: &cosmic_text::LayoutRun| {
                 let start_y_physical = (text_area.top + (run.line_top * text_area.scale)) as i32;
                 let end_y_physical = start_y_physical + (run.line_height * text_area.scale) as i32;
-                
-                start_y_physical <= text_area.bounds.bottom && text_area.bounds.top <= end_y_physical
+
+                start_y_physical <= text_area.bounds.bottom
+                    && text_area.bounds.top <= end_y_physical
             };
 
             let layout_runs = text_area
@@ -256,7 +283,6 @@ impl TextRenderer {
                         GlyphonCacheKey::Text(physical_glyph.cache_key),
                         atlas,
                         device,
-                        queue,
                         cache,
                         font_system,
                         text_area.scale,
@@ -312,20 +338,25 @@ impl TextRenderer {
         };
 
         if self.vertex_buffer_size >= vertices_raw.len() as u64 {
-            queue.write_buffer(&self.vertex_buffer, 0, vertices_raw);
+            unsafe {
+                self.vertex_buffer
+                    .contents()
+                    .copy_from(NonNull::from(vertices_raw).cast(), vertices_raw.len());
+            }
         } else {
-            self.vertex_buffer.destroy();
-
-            let (buffer, buffer_size) = create_oversized_buffer(
-                device,
-                Some("glyphon vertices"),
-                vertices_raw,
-                BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            );
-
+            let (buffer, buffer_size) = create_oversized_buffer(device, vertices_raw);
             self.vertex_buffer = buffer;
             self.vertex_buffer_size = buffer_size;
         }
+
+        self.residency_set.addAllocation(viewport.buffer.as_ref());
+        self.residency_set
+            .addAllocation(self.vertex_buffer.as_ref());
+        self.residency_set
+            .addAllocation(atlas.color_atlas.texture.as_ref());
+        self.residency_set
+            .addAllocation(atlas.mask_atlas.texture.as_ref());
+        self.residency_set.commit();
 
         Ok(())
     }
@@ -335,19 +366,36 @@ impl TextRenderer {
         &self,
         atlas: &TextAtlas,
         viewport: &Viewport,
-        pass: &mut RenderPass<'_>,
-    ) -> Result<(), RenderError> {
+        encoder: &Retained<ProtocolObject<dyn MTL4RenderCommandEncoder>>,
+    ) {
         if self.glyph_vertices.is_empty() {
-            return Ok(());
+            return;
         }
 
-        pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &atlas.bind_group, &[]);
-        pass.set_bind_group(1, &viewport.bind_group, &[]);
-        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        pass.draw(0..4, 0..self.glyph_vertices.len() as u32);
+        encoder.setRenderPipelineState(&self.pipeline);
+        encoder.setArgumentTable_atStages(
+            &self.argument_table,
+            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
+        );
 
-        Ok(())
+        unsafe {
+            self.argument_table
+                .setAddress_atIndex(viewport.buffer.gpuAddress(), 0);
+            self.argument_table
+                .setAddress_atIndex(self.vertex_buffer.gpuAddress(), 1);
+
+            self.argument_table
+                .setTexture_atIndex(atlas.color_atlas.texture.gpuResourceID(), 0);
+            self.argument_table
+                .setTexture_atIndex(atlas.mask_atlas.texture.gpuResourceID(), 1);
+
+            encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
+                MTLPrimitiveType::TriangleStrip,
+                0,
+                4,
+                self.glyph_vertices.len(),
+            );
+        }
     }
 }
 
@@ -370,20 +418,21 @@ fn next_copy_buffer_size(size: u64) -> u64 {
 }
 
 fn create_oversized_buffer(
-    device: &Device,
-    label: Option<&str>,
+    device: &Retained<ProtocolObject<dyn MTLDevice>>,
     contents: &[u8],
-    usage: BufferUsages,
-) -> (Buffer, u64) {
+) -> (Retained<ProtocolObject<dyn MTLBuffer>>, u64) {
     let size = next_copy_buffer_size(contents.len() as u64);
-    let buffer = device.create_buffer(&BufferDescriptor {
-        label,
-        size,
-        usage,
-        mapped_at_creation: true,
-    });
-    buffer.slice(..).get_mapped_range_mut()[..contents.len()].copy_from_slice(contents);
-    buffer.unmap();
+
+    let buffer = unsafe {
+        device
+            .newBufferWithBytes_length_options(
+                NonNull::from(contents).cast(),
+                size as usize,
+                MTLResourceOptions::StorageModeShared,
+            )
+            .unwrap()
+    };
+
     (buffer, size)
 }
 
@@ -408,8 +457,7 @@ fn prepare_glyph<R>(
     metadata: usize,
     cache_key: GlyphonCacheKey,
     atlas: &mut TextAtlas,
-    device: &Device,
-    queue: &Queue,
+    device: &Retained<ProtocolObject<dyn MTLDevice>>,
     cache: &mut SwashCache,
     font_system: &mut FontSystem,
     scale_factor: f32,
@@ -451,7 +499,6 @@ where
                     None => {
                         if !atlas.grow(
                             device,
-                            queue,
                             font_system,
                             cache,
                             image.content_type,
@@ -467,29 +514,27 @@ where
             };
             let atlas_min = allocation.rectangle.min;
 
-            queue.write_texture(
-                TexelCopyTextureInfo {
-                    texture: &inner.texture,
-                    mip_level: 0,
-                    origin: Origin3d {
-                        x: atlas_min.x as u32,
-                        y: atlas_min.y as u32,
-                        z: 0,
-                    },
-                    aspect: TextureAspect::All,
-                },
-                &image.data,
-                TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(image.width as u32 * inner.num_channels() as u32),
-                    rows_per_image: None,
-                },
-                Extent3d {
-                    width: image.width as u32,
-                    height: image.height as u32,
-                    depth_or_array_layers: 1,
-                },
-            );
+            unsafe {
+                inner
+                    .texture
+                    .replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                        MTLRegion {
+                            origin: MTLOrigin {
+                                x: atlas_min.x as usize,
+                                y: atlas_min.y as usize,
+                                z: 0,
+                            },
+                            size: MTLSize {
+                                width: image.width as usize,
+                                height: image.height as usize,
+                                depth: 1,
+                            },
+                        },
+                        0,
+                        NonNull::from(image.data.as_slice()).cast(),
+                        image.width as usize * inner.num_channels(),
+                    );
+            }
 
             (
                 GpuCacheStatus::InAtlas {

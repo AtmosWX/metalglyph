@@ -1,22 +1,85 @@
 [package]
-name = "glyphon"
-description = "Fast, simple 2D text rendering for wgpu"
+name = "metalglyph"
+description = "Fast, simple 2D text rendering for Metal 4"
 version = "0.9.0"
 edition = "2021"
-homepage = "https://github.com/grovesNL/glyphon.git"
-repository = "https://github.com/grovesNL/glyphon"
+homepage = "https://github.com/AtmosWX/metalglyph.git"
+repository = "https://github.com/AtmosWX/metalglyph"
 license = "MIT OR Apache-2.0 OR Zlib"
 
 [dependencies]
-wgpu = { version = "27.0.1", default-features = false, features = ["wgsl"] }
 etagere = "0.2.10"
 cosmic-text = "0.14"
 lru = { version = "0.16", default-features = false }
 rustc-hash = "2.1.1"
+raw-window-handle = "0.6.2"
+objc2 = "0.6.3"
+dispatch2 = "0.3.0"
+block2 = "0.6.2"
+objc2-metal = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "MTLAllocation",
+    "MTLAccelerationStructureTypes",
+    "MTLLibrary",
+    "MTLRenderPipeline",
+    "MTLRenderCommandEncoder",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLCommandQueue",
+    "MTL4CommandQueue",
+    "MTLPixelFormat",
+    "MTLDevice",
+    "MTLDrawable",
+    "MTLRenderPass",
+    "default" # temp
+] }
+objc2-metal-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "objc2-app-kit",
+    "objc2-quartz-core",
+    "objc2-model-io",
+    "MTKView",
+    "MTKModel",
+    "default" # temporary
+] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSError",
+    "NSString",
+    "NSDate",
+    "NSNotification",
+    "NSThread",
+    "NSGeometry",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFCGTypes",
+] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-quartz-core",
+    "NSApplication",
+    "NSGraphics",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+    "NSRunningApplication",
+    "NSView",
+    "NSViewController",
+    "NSWindow",
+    "NSWindowController",
+    "NSEvent",
+    "NSTrackingArea"
+] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
+    "CAMetalLayer",
+    "objc2-core-foundation",
+] }
 
 [dev-dependencies]
 winit = "0.30.3"
-wgpu = "27.0.1"
 resvg = { version = "0.45", default-features = false }
 pollster = "0.4.0"
 criterion = { version = "0.6", features = ["html_reports"] }

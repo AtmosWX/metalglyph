@@ -1,211 +1,72 @@
-use crate::{GlyphToRender, Params};
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_foundation::ns_string;
+use objc2_metal::{
+    MTL4BlendState, MTL4Compiler, MTL4LibraryFunctionDescriptor, MTL4RenderPipelineDescriptor,
+    MTLBlendFactor, MTLDevice, MTLPixelFormat, MTLRenderPipelineState,
+};
 use std::{
-    borrow::Cow,
-    mem,
-    num::NonZeroU64,
     ops::Deref,
     sync::{Arc, Mutex},
 };
-use wgpu::{
-    BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout, BindGroupLayoutEntry,
-    BindingResource, BindingType, BlendState, Buffer, BufferBindingType, ColorTargetState,
-    ColorWrites, DepthStencilState, Device, FilterMode, FragmentState, MultisampleState,
-    PipelineCompilationOptions, PipelineLayout, PipelineLayoutDescriptor, PrimitiveState,
-    PrimitiveTopology, RenderPipeline, RenderPipelineDescriptor, Sampler, SamplerBindingType,
-    SamplerDescriptor, ShaderModule, ShaderModuleDescriptor, ShaderSource, ShaderStages,
-    TextureFormat, TextureSampleType, TextureView, TextureViewDimension, VertexFormat, VertexState,
-};
 
-/// A cache to share common resources (e.g., pipelines, layouts, shaders) between multiple text
+/// A cache to share common resources (e.g., pipelines, shaders) between multiple text
 /// renderers.
 #[derive(Debug, Clone)]
 pub struct Cache(Arc<Inner>);
 
 #[derive(Debug)]
 struct Inner {
-    sampler: Sampler,
-    shader: ShaderModule,
-    vertex_buffers: [wgpu::VertexBufferLayout<'static>; 1],
-    atlas_layout: BindGroupLayout,
-    uniforms_layout: BindGroupLayout,
-    pipeline_layout: PipelineLayout,
+    pipeline_descriptor: Retained<MTL4RenderPipelineDescriptor>,
     cache: Mutex<
         Vec<(
-            TextureFormat,
-            MultisampleState,
-            Option<DepthStencilState>,
-            RenderPipeline,
+            MTLPixelFormat,
+            Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
         )>,
     >,
 }
 
 impl Cache {
     /// Creates a new `Cache` with the given `device`.
-    pub fn new(device: &Device) -> Self {
-        let sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("glyphon sampler"),
-            min_filter: FilterMode::Nearest,
-            mag_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
-            lod_min_clamp: 0f32,
-            lod_max_clamp: 0f32,
-            ..Default::default()
-        });
+    pub fn new(device: &Retained<ProtocolObject<dyn MTLDevice>>) -> Self {
+        let library = device
+            .newLibraryWithSource_options_error(ns_string!(include_str!("./shader.metal")), None)
+            .expect("Failed to create shader library.");
 
-        let shader = device.create_shader_module(ShaderModuleDescriptor {
-            label: Some("glyphon shader"),
-            source: ShaderSource::Wgsl(Cow::Borrowed(include_str!("shader.wgsl"))),
-        });
+        let descriptor = MTL4RenderPipelineDescriptor::new();
 
-        let vertex_buffer_layout = wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<GlyphToRender>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    format: VertexFormat::Sint32x2,
-                    offset: 0,
-                    shader_location: 0,
-                },
-                wgpu::VertexAttribute {
-                    format: VertexFormat::Uint32,
-                    offset: mem::size_of::<u32>() as u64 * 2,
-                    shader_location: 1,
-                },
-                wgpu::VertexAttribute {
-                    format: VertexFormat::Uint32,
-                    offset: mem::size_of::<u32>() as u64 * 3,
-                    shader_location: 2,
-                },
-                wgpu::VertexAttribute {
-                    format: VertexFormat::Uint32,
-                    offset: mem::size_of::<u32>() as u64 * 4,
-                    shader_location: 3,
-                },
-                wgpu::VertexAttribute {
-                    format: VertexFormat::Uint32,
-                    offset: mem::size_of::<u32>() as u64 * 5,
-                    shader_location: 4,
-                },
-                wgpu::VertexAttribute {
-                    format: VertexFormat::Float32,
-                    offset: mem::size_of::<u32>() as u64 * 6,
-                    shader_location: 5,
-                },
-            ],
-        };
+        let vertex_function = MTL4LibraryFunctionDescriptor::new();
+        vertex_function.setLibrary(Some(&library));
+        vertex_function.setName(Some(ns_string!("vs_main")));
+        descriptor.setVertexFunctionDescriptor(Some(&vertex_function));
 
-        let atlas_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: TextureViewDimension::D2,
-                        sample_type: TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::VERTEX | ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        multisampled: false,
-                        view_dimension: TextureViewDimension::D2,
-                        sample_type: TextureSampleType::Float { filterable: true },
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-            label: Some("glyphon atlas bind group layout"),
-        });
+        let fragment_function = MTL4LibraryFunctionDescriptor::new();
+        fragment_function.setLibrary(Some(&library));
+        fragment_function.setName(Some(ns_string!("fs_main")));
+        descriptor.setFragmentFunctionDescriptor(Some(&fragment_function));
 
-        let uniforms_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::VERTEX,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(mem::size_of::<Params>() as u64),
-                },
-                count: None,
-            }],
-            label: Some("glyphon uniforms bind group layout"),
-        });
+        let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
 
-        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
-            label: None,
-            bind_group_layouts: &[&atlas_layout, &uniforms_layout],
-            push_constant_ranges: &[],
-        });
+        attachment.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
+        attachment.setBlendingState(MTL4BlendState::Enabled);
+        attachment.setSourceRGBBlendFactor(MTLBlendFactor::SourceAlpha);
+        attachment.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
+        attachment.setSourceAlphaBlendFactor(MTLBlendFactor::SourceAlpha);
+        attachment.setDestinationAlphaBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
 
         Self(Arc::new(Inner {
-            sampler,
-            shader,
-            vertex_buffers: [vertex_buffer_layout],
-            uniforms_layout,
-            atlas_layout,
-            pipeline_layout,
+            pipeline_descriptor: descriptor,
             cache: Mutex::new(Vec::new()),
         }))
     }
 
-    pub(crate) fn create_atlas_bind_group(
-        &self,
-        device: &Device,
-        color_atlas: &TextureView,
-        mask_atlas: &TextureView,
-    ) -> BindGroup {
-        device.create_bind_group(&BindGroupDescriptor {
-            layout: &self.0.atlas_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(color_atlas),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::TextureView(mask_atlas),
-                },
-                BindGroupEntry {
-                    binding: 2,
-                    resource: BindingResource::Sampler(&self.0.sampler),
-                },
-            ],
-            label: Some("glyphon atlas bind group"),
-        })
-    }
-
-    pub(crate) fn create_uniforms_bind_group(&self, device: &Device, buffer: &Buffer) -> BindGroup {
-        device.create_bind_group(&BindGroupDescriptor {
-            layout: &self.0.uniforms_layout,
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: Some("glyphon uniforms bind group"),
-        })
-    }
-
     pub(crate) fn get_or_create_pipeline(
         &self,
-        device: &Device,
-        format: TextureFormat,
-        multisample: MultisampleState,
-        depth_stencil: Option<DepthStencilState>,
-    ) -> RenderPipeline {
+        compiler: &Retained<ProtocolObject<dyn MTL4Compiler>>,
+        format: MTLPixelFormat,
+    ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
         let Inner {
+            pipeline_descriptor,
             cache,
-            pipeline_layout,
-            shader,
-            vertex_buffers,
             ..
         } = self.0.deref();
 
@@ -213,39 +74,25 @@ impl Cache {
 
         cache
             .iter()
-            .find(|(fmt, ms, ds, _)| fmt == &format && ms == &multisample && ds == &depth_stencil)
-            .map(|(_, _, _, p)| p.clone())
+            .find(|(fmt, _)| fmt == &format)
+            .map(|(_, p)| p.clone())
             .unwrap_or_else(|| {
-                let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
-                    label: Some("glyphon pipeline"),
-                    layout: Some(pipeline_layout),
-                    vertex: VertexState {
-                        module: shader,
-                        entry_point: Some("vs_main"),
-                        buffers: vertex_buffers,
-                        compilation_options: PipelineCompilationOptions::default(),
-                    },
-                    fragment: Some(FragmentState {
-                        module: shader,
-                        entry_point: Some("fs_main"),
-                        targets: &[Some(ColorTargetState {
-                            format,
-                            blend: Some(BlendState::ALPHA_BLENDING),
-                            write_mask: ColorWrites::default(),
-                        })],
-                        compilation_options: PipelineCompilationOptions::default(),
-                    }),
-                    primitive: PrimitiveState {
-                        topology: PrimitiveTopology::TriangleStrip,
-                        ..Default::default()
-                    },
-                    depth_stencil: depth_stencil.clone(),
-                    multisample,
-                    multiview: None,
-                    cache: None,
-                });
+                let attachment = unsafe {
+                    pipeline_descriptor
+                        .colorAttachments()
+                        .objectAtIndexedSubscript(0)
+                };
 
-                cache.push((format, multisample, depth_stencil, pipeline.clone()));
+                attachment.setPixelFormat(format);
+
+                let pipeline = compiler
+                    .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(
+                        &pipeline_descriptor,
+                        None,
+                    )
+                    .expect("Failed to create pipeline descriptor");
+
+                cache.push((format, pipeline.clone()));
 
                 pipeline
             })

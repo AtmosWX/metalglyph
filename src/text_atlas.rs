@@ -4,55 +4,48 @@ use crate::{
 };
 use etagere::{size2, Allocation, BucketedAtlasAllocator};
 use lru::LruCache;
-use rustc_hash::FxHasher;
-use std::{collections::HashSet, hash::BuildHasherDefault};
-use wgpu::{
-    BindGroup, DepthStencilState, Device, Extent3d, MultisampleState, Origin3d, Queue,
-    RenderPipeline, TexelCopyBufferLayout, TexelCopyTextureInfo, Texture, TextureAspect,
-    TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
-    TextureViewDescriptor,
+use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_metal::{
+    MTL4Compiler, MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLRenderPipelineState, MTLSize,
+    MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
+use rustc_hash::FxHasher;
+use std::{collections::HashSet, hash::BuildHasherDefault, ptr::NonNull};
 
 type Hasher = BuildHasherDefault<FxHasher>;
 
 #[allow(dead_code)]
 pub(crate) struct InnerAtlas {
     pub kind: Kind,
-    pub texture: Texture,
-    pub texture_view: TextureView,
+    pub texture: Retained<ProtocolObject<dyn MTLTexture>>,
     pub packer: BucketedAtlasAllocator,
     pub size: u32,
     pub glyph_cache: LruCache<GlyphonCacheKey, GlyphDetails, Hasher>,
     pub glyphs_in_use: HashSet<GlyphonCacheKey, Hasher>,
-    pub max_texture_dimension_2d: u32,
 }
 
 impl InnerAtlas {
     const INITIAL_SIZE: u32 = 256;
+    const MAX_TEXTURE_DIMENSION_2D: u32 = 16384;
 
-    fn new(device: &Device, _queue: &Queue, kind: Kind) -> Self {
-        let max_texture_dimension_2d = device.limits().max_texture_dimension_2d;
-        let size = Self::INITIAL_SIZE.min(max_texture_dimension_2d);
-
+    fn new(device: &Retained<ProtocolObject<dyn MTLDevice>>, kind: Kind) -> Self {
+        let size = Self::INITIAL_SIZE;
         let packer = BucketedAtlasAllocator::new(size2(size as i32, size as i32));
 
-        // Create a texture to use for our atlas
-        let texture = device.create_texture(&TextureDescriptor {
-            label: Some("glyphon atlas"),
-            size: Extent3d {
-                width: size,
-                height: size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: kind.texture_format(),
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                kind.texture_format(),
+                size as usize,
+                size as usize,
+                false,
+            )
+        };
 
-        let texture_view = texture.create_view(&TextureViewDescriptor::default());
+        descriptor.setUsage(MTLTextureUsage::ShaderRead);
+
+        let texture = device
+            .newTextureWithDescriptor(&descriptor)
+            .expect("Failed to create texture");
 
         let glyph_cache = LruCache::unbounded_with_hasher(Hasher::default());
         let glyphs_in_use = HashSet::with_hasher(Hasher::default());
@@ -60,12 +53,10 @@ impl InnerAtlas {
         Self {
             kind,
             texture,
-            texture_view,
             packer,
             size,
             glyph_cache,
             glyphs_in_use,
-            max_texture_dimension_2d,
         }
     }
 
@@ -110,8 +101,7 @@ impl InnerAtlas {
 
     pub(crate) fn grow(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         font_system: &mut FontSystem,
         cache: &mut SwashCache,
         scale_factor: f32,
@@ -119,32 +109,31 @@ impl InnerAtlas {
             RasterizeCustomGlyphRequest,
         ) -> Option<RasterizedCustomGlyph>,
     ) -> bool {
-        if self.size >= self.max_texture_dimension_2d {
+        if self.size >= Self::MAX_TEXTURE_DIMENSION_2D {
             return false;
         }
 
         // Grow each dimension by a factor of 2. The growth factor was chosen to match the growth
         // factor of `Vec`.`
         const GROWTH_FACTOR: u32 = 2;
-        let new_size = (self.size * GROWTH_FACTOR).min(self.max_texture_dimension_2d);
+        let new_size = (self.size * GROWTH_FACTOR).min(Self::MAX_TEXTURE_DIMENSION_2D);
 
         self.packer.grow(size2(new_size as i32, new_size as i32));
 
-        // Create a texture to use for our atlas
-        self.texture = device.create_texture(&TextureDescriptor {
-            label: Some("glyphon atlas"),
-            size: Extent3d {
-                width: new_size,
-                height: new_size,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: TextureDimension::D2,
-            format: self.kind.texture_format(),
-            usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
+        let descriptor = unsafe {
+            MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                self.kind.texture_format(),
+                new_size as usize,
+                new_size as usize,
+                false,
+            )
+        };
+
+        descriptor.setUsage(MTLTextureUsage::ShaderRead);
+
+        self.texture = device
+            .newTextureWithDescriptor(&descriptor)
+            .expect("Failed to create texture");
 
         // Re-upload glyphs
         for (&cache_key, glyph) in &self.glyph_cache {
@@ -186,32 +175,28 @@ impl InnerAtlas {
                 }
             };
 
-            queue.write_texture(
-                TexelCopyTextureInfo {
-                    texture: &self.texture,
-                    mip_level: 0,
-                    origin: Origin3d {
-                        x: x as u32,
-                        y: y as u32,
-                        z: 0,
-                    },
-                    aspect: TextureAspect::All,
-                },
-                &image_data,
-                TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(width as u32 * self.kind.num_channels() as u32),
-                    rows_per_image: None,
-                },
-                Extent3d {
-                    width: width as u32,
-                    height: height as u32,
-                    depth_or_array_layers: 1,
-                },
-            );
+            unsafe {
+                self.texture
+                    .replaceRegion_mipmapLevel_withBytes_bytesPerRow(
+                        MTLRegion {
+                            origin: MTLOrigin {
+                                x: x.into(),
+                                y: y.into(),
+                                z: 0,
+                            },
+                            size: MTLSize {
+                                width,
+                                height,
+                                depth: 1,
+                            },
+                        },
+                        0,
+                        NonNull::from(image_data.as_slice()).cast(),
+                        width * self.kind.num_channels(),
+                    );
+            }
         }
 
-        self.texture_view = self.texture.create_view(&TextureViewDescriptor::default());
         self.size = new_size;
 
         true
@@ -236,14 +221,14 @@ impl Kind {
         }
     }
 
-    fn texture_format(self) -> wgpu::TextureFormat {
+    fn texture_format(self) -> MTLPixelFormat {
         match self {
-            Kind::Mask => TextureFormat::R8Unorm,
+            Kind::Mask => MTLPixelFormat::R8Unorm,
             Kind::Color { srgb } => {
                 if srgb {
-                    TextureFormat::Rgba8UnormSrgb
+                    MTLPixelFormat::RGBA8Unorm_sRGB
                 } else {
-                    TextureFormat::Rgba8Unorm
+                    MTLPixelFormat::RGBA8Unorm
                 }
             }
         }
@@ -283,30 +268,31 @@ pub enum ColorMode {
 /// An atlas containing a cache of rasterized glyphs that can be rendered.
 pub struct TextAtlas {
     cache: Cache,
-    pub(crate) bind_group: BindGroup,
     pub(crate) color_atlas: InnerAtlas,
     pub(crate) mask_atlas: InnerAtlas,
-    pub(crate) format: TextureFormat,
+    pub(crate) format: MTLPixelFormat,
     pub(crate) color_mode: ColorMode,
 }
 
 impl TextAtlas {
     /// Creates a new [`TextAtlas`].
-    pub fn new(device: &Device, queue: &Queue, cache: &Cache, format: TextureFormat) -> Self {
-        Self::with_color_mode(device, queue, cache, format, ColorMode::Accurate)
+    pub fn new(
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
+        cache: &Cache,
+        format: MTLPixelFormat,
+    ) -> Self {
+        Self::with_color_mode(device, cache, format, ColorMode::Accurate)
     }
 
     /// Creates a new [`TextAtlas`] with the given [`ColorMode`].
     pub fn with_color_mode(
-        device: &Device,
-        queue: &Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         cache: &Cache,
-        format: TextureFormat,
+        format: MTLPixelFormat,
         color_mode: ColorMode,
     ) -> Self {
         let color_atlas = InnerAtlas::new(
             device,
-            queue,
             Kind::Color {
                 srgb: match color_mode {
                     ColorMode::Accurate => true,
@@ -314,17 +300,11 @@ impl TextAtlas {
                 },
             },
         );
-        let mask_atlas = InnerAtlas::new(device, queue, Kind::Mask);
 
-        let bind_group = cache.create_atlas_bind_group(
-            device,
-            &color_atlas.texture_view,
-            &mask_atlas.texture_view,
-        );
+        let mask_atlas = InnerAtlas::new(device, Kind::Mask);
 
         Self {
             cache: cache.clone(),
-            bind_group,
             color_atlas,
             mask_atlas,
             format,
@@ -339,8 +319,7 @@ impl TextAtlas {
 
     pub(crate) fn grow(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         font_system: &mut FontSystem,
         cache: &mut SwashCache,
         content_type: ContentType,
@@ -350,7 +329,6 @@ impl TextAtlas {
         let did_grow = match content_type {
             ContentType::Mask => self.mask_atlas.grow(
                 device,
-                queue,
                 font_system,
                 cache,
                 scale_factor,
@@ -358,17 +336,12 @@ impl TextAtlas {
             ),
             ContentType::Color => self.color_atlas.grow(
                 device,
-                queue,
                 font_system,
                 cache,
                 scale_factor,
                 rasterize_custom_glyph,
             ),
         };
-
-        if did_grow {
-            self.rebind(device);
-        }
 
         did_grow
     }
@@ -382,19 +355,10 @@ impl TextAtlas {
 
     pub(crate) fn get_or_create_pipeline(
         &self,
-        device: &Device,
-        multisample: MultisampleState,
-        depth_stencil: Option<DepthStencilState>,
-    ) -> RenderPipeline {
-        self.cache
-            .get_or_create_pipeline(device, self.format, multisample, depth_stencil)
-    }
-
-    fn rebind(&mut self, device: &wgpu::Device) {
-        self.bind_group = self.cache.create_atlas_bind_group(
-            device,
-            &self.color_atlas.texture_view,
-            &self.mask_atlas.texture_view,
-        );
+        compiler: &Retained<ProtocolObject<dyn MTL4Compiler>>,
+        // multisample: MultisampleState,
+        // depth_stencil: Option<DepthStencilState>,
+    ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
+        self.cache.get_or_create_pipeline(compiler, self.format)
     }
 }
