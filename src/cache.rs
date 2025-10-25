@@ -1,8 +1,8 @@
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::ns_string;
 use objc2_metal::{
-    MTL4BlendState, MTL4Compiler, MTL4LibraryFunctionDescriptor, MTL4RenderPipelineDescriptor,
-    MTLBlendFactor, MTLDevice, MTLPixelFormat, MTLRenderPipelineState,
+    MTLBlendFactor, MTLDevice, MTLLibrary, MTLPixelFormat, MTLRenderPipelineDescriptor,
+    MTLRenderPipelineState,
 };
 use std::{
     ops::Deref,
@@ -16,7 +16,7 @@ pub struct Cache(Arc<Inner>);
 
 #[derive(Debug)]
 struct Inner {
-    pipeline_descriptor: Retained<MTL4RenderPipelineDescriptor>,
+    pipeline_descriptor: Retained<MTLRenderPipelineDescriptor>,
     cache: Mutex<
         Vec<(
             MTLPixelFormat,
@@ -32,22 +32,18 @@ impl Cache {
             .newLibraryWithSource_options_error(ns_string!(include_str!("./shader.metal")), None)
             .expect("Failed to create shader library.");
 
-        let descriptor = MTL4RenderPipelineDescriptor::new();
+        let descriptor = MTLRenderPipelineDescriptor::new();
 
-        let vertex_function = MTL4LibraryFunctionDescriptor::new();
-        vertex_function.setLibrary(Some(&library));
-        vertex_function.setName(Some(ns_string!("vs_main")));
-        descriptor.setVertexFunctionDescriptor(Some(&vertex_function));
+        let vertex_function = library.newFunctionWithName(ns_string!("vs_main"));
+        descriptor.setVertexFunction(vertex_function.as_deref());
 
-        let fragment_function = MTL4LibraryFunctionDescriptor::new();
-        fragment_function.setLibrary(Some(&library));
-        fragment_function.setName(Some(ns_string!("fs_main")));
-        descriptor.setFragmentFunctionDescriptor(Some(&fragment_function));
+        let fragment_function = library.newFunctionWithName(ns_string!("fs_main"));
+        descriptor.setFragmentFunction(fragment_function.as_deref());
 
         let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };
 
         attachment.setPixelFormat(MTLPixelFormat::BGRA8Unorm);
-        attachment.setBlendingState(MTL4BlendState::Enabled);
+        attachment.setBlendingEnabled(true);
         attachment.setSourceRGBBlendFactor(MTLBlendFactor::SourceAlpha);
         attachment.setDestinationRGBBlendFactor(MTLBlendFactor::OneMinusSourceAlpha);
         attachment.setSourceAlphaBlendFactor(MTLBlendFactor::SourceAlpha);
@@ -61,7 +57,7 @@ impl Cache {
 
     pub(crate) fn get_or_create_pipeline(
         &self,
-        compiler: &Retained<ProtocolObject<dyn MTL4Compiler>>,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         format: MTLPixelFormat,
     ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
         let Inner {
@@ -85,12 +81,9 @@ impl Cache {
 
                 attachment.setPixelFormat(format);
 
-                let pipeline = compiler
-                    .newRenderPipelineStateWithDescriptor_compilerTaskOptions_error(
-                        &pipeline_descriptor,
-                        None,
-                    )
-                    .expect("Failed to create pipeline descriptor");
+                let pipeline = device
+                    .newRenderPipelineStateWithDescriptor_error(&pipeline_descriptor)
+                    .expect("Failed to create pipeline state");
 
                 cache.push((format, pipeline.clone()));
 

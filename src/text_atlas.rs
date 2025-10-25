@@ -6,8 +6,8 @@ use etagere::{size2, Allocation, BucketedAtlasAllocator};
 use lru::LruCache;
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_metal::{
-    MTL4Compiler, MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLRenderPipelineState, MTLSize,
-    MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLRenderPipelineState, MTLSize, MTLTexture,
+    MTLTextureDescriptor, MTLTextureUsage,
 };
 use rustc_hash::FxHasher;
 use std::{collections::HashSet, hash::BuildHasherDefault, ptr::NonNull};
@@ -355,10 +355,10 @@ impl TextAtlas {
 
     pub(crate) fn get_or_create_pipeline(
         &self,
-        compiler: &Retained<ProtocolObject<dyn MTL4Compiler>>,
+        device: &Retained<ProtocolObject<dyn MTLDevice>>,
         // multisample: MultisampleState,
         // depth_stencil: Option<DepthStencilState>,
     ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
-        self.cache.get_or_create_pipeline(compiler, self.format)
+        self.cache.get_or_create_pipeline(device, self.format)
     }
 }

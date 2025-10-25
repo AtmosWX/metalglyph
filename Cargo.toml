@@ -1,6 +1,6 @@
 [package]
 name = "metalglyph"
-description = "Fast, simple 2D text rendering for Metal 4"
+description = "Fast, simple 2D text rendering for Metal"
 version = "0.9.0"
 edition = "2021"
 homepage = "https://github.com/AtmosWX/metalglyph.git"

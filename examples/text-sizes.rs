@@ -9,13 +9,13 @@ use objc2::{
 use objc2_app_kit::NSView;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{
-    MTL4CommandAllocator, MTL4CommandBuffer, MTL4CommandEncoder as _, MTL4CommandQueue,
-    MTL4RenderPassDescriptor, MTLClearColor, MTLCreateSystemDefaultDevice, MTLDevice,
-    MTLDrawable as _, MTLLoadAction, MTLPixelFormat, MTLStoreAction,
+    MTLClearColor, MTLCommandBuffer as _, MTLCommandEncoder as _, MTLCommandQueue,
+    MTLCreateSystemDefaultDevice, MTLDevice, MTLLoadAction, MTLPixelFormat,
+    MTLRenderPassDescriptor, MTLStoreAction,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use std::{ptr::NonNull, sync::Arc};
+use std::sync::Arc;
 use winit::{
     dpi::{LogicalSize, PhysicalSize},
     event::WindowEvent,
@@ -43,9 +43,7 @@ fn main() {
 
 struct WindowState {
     device: Retained<ProtocolObject<dyn MTLDevice>>,
-    queue: Retained<ProtocolObject<dyn MTL4CommandQueue>>,
-    alloc: Retained<ProtocolObject<dyn MTL4CommandAllocator>>,
-    buffer: Retained<ProtocolObject<dyn MTL4CommandBuffer>>,
+    queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
 
     surface: Retained<CAMetalLayer>,
     physical_size: PhysicalSize<i32>,
@@ -77,18 +75,7 @@ impl WindowState {
         };
 
         let device = MTLCreateSystemDefaultDevice().expect("Create MTL device");
-
-        let queue = device
-            .newMTL4CommandQueue()
-            .expect("Create MTL command queue");
-
-        let alloc = device
-            .newCommandAllocator()
-            .expect("Create MTL command allocator");
-
-        let buffer = device
-            .newCommandBuffer()
-            .expect("Create MTL command buffer");
+        let queue = device.newCommandQueue().expect("Create MTL command queue");
 
         let surface = CAMetalLayer::new();
         surface.setDevice(Some(&device));
@@ -110,9 +97,6 @@ impl WindowState {
 
         view.setWantsLayer(true);
         view.setLayer(Some(&surface));
-
-        queue.addResidencySet(&surface.residencySet());
-        queue.addResidencySet(text_renderer.residency_set());
 
         let attrs = Attrs::new().family(Family::SansSerif).weight(WEIGHT);
         let shaping = Shaping::Advanced;
@@ -143,8 +127,6 @@ impl WindowState {
         Self {
             device,
             queue,
-            alloc,
-            buffer,
 
             surface,
             physical_size: physical_size.cast(),
@@ -196,8 +178,6 @@ impl winit::application::ApplicationHandler for Application {
             window,
             device,
             queue,
-            alloc,
-            buffer,
             surface,
             font_system,
             swash_cache,
@@ -236,9 +216,6 @@ impl winit::application::ApplicationHandler for Application {
                         Some(drawable) => drawable,
                         None => panic!("Failed to get next drawable"),
                     };
-
-                    alloc.reset();
-                    buffer.beginCommandBufferWithAllocator(&alloc);
 
                     let resolution = Resolution {
                         width: surface.drawableSize().width as u32,
@@ -295,7 +272,7 @@ impl winit::application::ApplicationHandler for Application {
                         )
                         .unwrap();
 
-                    let render_pass_descriptor = MTL4RenderPassDescriptor::new();
+                    let render_pass_descriptor = MTLRenderPassDescriptor::new();
                     let color_attachment = unsafe {
                         render_pass_descriptor
                             .colorAttachments()
@@ -312,6 +289,10 @@ impl winit::application::ApplicationHandler for Application {
                     });
                     color_attachment.setStoreAction(MTLStoreAction::Store);
 
+                    let Some(buffer) = queue.commandBuffer() else {
+                        return;
+                    };
+
                     let Some(render_encoder) =
                         buffer.renderCommandEncoderWithDescriptor(&render_pass_descriptor)
                     else {
@@ -322,20 +303,8 @@ impl winit::application::ApplicationHandler for Application {
 
                     render_encoder.endEncoding();
 
-                    buffer.endCommandBuffer();
-                    queue.waitForDrawable(drawable.as_ref());
-                    queue.signalDrawable(drawable.as_ref());
-
-                    unsafe {
-                        queue.commit_count(
-                            NonNull::from(
-                                &NonNull::new(Retained::as_ptr(&buffer) as *mut _).unwrap(),
-                            ),
-                            1,
-                        );
-                    }
-
-                    drawable.present();
+                    buffer.presentDrawable(drawable.as_ref());
+                    buffer.commit();
                     atlas.trim();
                 });
             }

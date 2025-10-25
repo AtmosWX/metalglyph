@@ -6,10 +6,8 @@ use crate::{
 use cosmic_text::{Color, SubpixelBin};
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_metal::{
-    MTL4ArgumentTable, MTL4ArgumentTableDescriptor, MTL4CompilerDescriptor,
-    MTL4RenderCommandEncoder, MTLBuffer, MTLDevice, MTLOrigin, MTLPrimitiveType, MTLRegion,
-    MTLRenderPipelineState, MTLRenderStages, MTLResidencySet, MTLResidencySetDescriptor,
-    MTLResourceOptions, MTLSize, MTLTexture as _,
+    MTLBuffer, MTLDevice, MTLOrigin, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder,
+    MTLRenderPipelineState, MTLResourceOptions, MTLSize, MTLTexture as _,
 };
 use std::{ptr::NonNull, slice};
 
@@ -19,9 +17,7 @@ const COPY_BUFFER_ALIGNMENT: u64 = 4;
 pub struct TextRenderer {
     vertex_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
     vertex_buffer_size: u64,
-    residency_set: Retained<ProtocolObject<dyn MTLResidencySet>>,
     pipeline: Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
-    argument_table: Retained<ProtocolObject<dyn MTL4ArgumentTable>>,
     glyph_vertices: Vec<GlyphToRender>,
 }
 
@@ -43,40 +39,14 @@ impl TextRenderer {
             )
             .unwrap();
 
-        let compiler = device
-            .newCompilerWithDescriptor_error(&MTL4CompilerDescriptor::new())
-            .expect("Failed to create MTLCompiler");
-
-        let residency_set = device
-            .newResidencySetWithDescriptor_error(&MTLResidencySetDescriptor::new())
-            .expect("Failed to create MTLResidencySet");
-
-        residency_set.addAllocation(vertex_buffer.as_ref());
-        residency_set.commit();
-
-        let pipeline = atlas.get_or_create_pipeline(&compiler);
-
-        let argument_table_descriptor = MTL4ArgumentTableDescriptor::new();
-        argument_table_descriptor.setMaxBufferBindCount(2);
-        argument_table_descriptor.setMaxTextureBindCount(2);
-
-        let argument_table = device
-            .newArgumentTableWithDescriptor_error(&argument_table_descriptor)
-            .expect("Failed to create MTLArgumentTable");
+        let pipeline = atlas.get_or_create_pipeline(&device);
 
         Self {
             vertex_buffer,
             vertex_buffer_size,
             pipeline,
-            residency_set,
-            argument_table,
             glyph_vertices: Vec::new(),
         }
-    }
-
-    /// Returns the residency set used by this text renderer.
-    pub fn residency_set(&self) -> &Retained<ProtocolObject<dyn MTLResidencySet>> {
-        &self.residency_set
     }
 
     /// Prepares all of the provided text areas for rendering.
@@ -349,15 +319,6 @@ impl TextRenderer {
             self.vertex_buffer_size = buffer_size;
         }
 
-        self.residency_set.addAllocation(viewport.buffer.as_ref());
-        self.residency_set
-            .addAllocation(self.vertex_buffer.as_ref());
-        self.residency_set
-            .addAllocation(atlas.color_atlas.texture.as_ref());
-        self.residency_set
-            .addAllocation(atlas.mask_atlas.texture.as_ref());
-        self.residency_set.commit();
-
         Ok(())
     }
 
@@ -366,28 +327,21 @@ impl TextRenderer {
         &self,
         atlas: &TextAtlas,
         viewport: &Viewport,
-        encoder: &Retained<ProtocolObject<dyn MTL4RenderCommandEncoder>>,
+        encoder: &Retained<ProtocolObject<dyn MTLRenderCommandEncoder>>,
     ) {
         if self.glyph_vertices.is_empty() {
             return;
         }
 
         encoder.setRenderPipelineState(&self.pipeline);
-        encoder.setArgumentTable_atStages(
-            &self.argument_table,
-            MTLRenderStages::Vertex | MTLRenderStages::Fragment,
-        );
 
         unsafe {
-            self.argument_table
-                .setAddress_atIndex(viewport.buffer.gpuAddress(), 0);
-            self.argument_table
-                .setAddress_atIndex(self.vertex_buffer.gpuAddress(), 1);
-
-            self.argument_table
-                .setTexture_atIndex(atlas.color_atlas.texture.gpuResourceID(), 0);
-            self.argument_table
-                .setTexture_atIndex(atlas.mask_atlas.texture.gpuResourceID(), 1);
+            encoder.setVertexBuffer_offset_atIndex(Some(&viewport.buffer), 0, 0);
+            encoder.setVertexBuffer_offset_atIndex(Some(&self.vertex_buffer), 0, 1);
+            encoder.setVertexTexture_atIndex(Some(&atlas.color_atlas.texture), 0);
+            encoder.setVertexTexture_atIndex(Some(&atlas.mask_atlas.texture), 1);
+            encoder.setFragmentTexture_atIndex(Some(&atlas.color_atlas.texture), 0);
+            encoder.setFragmentTexture_atIndex(Some(&atlas.mask_atlas.texture), 1);
 
             encoder.drawPrimitives_vertexStart_vertexCount_instanceCount(
                 MTLPrimitiveType::TriangleStrip,

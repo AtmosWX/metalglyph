@@ -2,12 +2,12 @@
 
 # metalglyph
 
-Fast, simple 2D text rendering for Metal 4 through [`objc2`](https://github.com/madsmtm/objc2).
+Fast, simple 2D text rendering for Metal through [`objc2`](https://github.com/madsmtm/objc2).
 
 </div>
 
 ## What is this?
-A fork of [`glyphon`], with the [`wgpu`] renderer swapped out for a Metal 4 renderer.
+A fork of [`glyphon`], with the [`wgpu`] renderer swapped out for a Metal renderer.
 
 [`glyphon`]: https://github.com/grovesNL/glyphon
 [`wgpu`]: https://github.com/gfx-rs/wgpu
