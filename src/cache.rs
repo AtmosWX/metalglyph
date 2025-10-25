@@ -34,6 +34,7 @@ impl Cache {
             .expect("Failed to create shader library.");
 
         let descriptor = MTLRenderPipelineDescriptor::new();
+        descriptor.setLabel(Some(ns_string!("Metalglyph Pipeline Descriptor")));
 
         let vertex_function = library.newFunctionWithName(ns_string!("vs_main"));
         descriptor.setVertexFunction(vertex_function.as_deref());

@@ -5,9 +5,10 @@ use crate::{
 use etagere::{size2, Allocation, BucketedAtlasAllocator};
 use lru::LruCache;
 use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_foundation::ns_string;
 use objc2_metal::{
-    MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLRenderPipelineState, MTLSize, MTLTexture,
-    MTLTextureDescriptor, MTLTextureUsage,
+    MTLDevice, MTLOrigin, MTLPixelFormat, MTLRegion, MTLRenderPipelineState, MTLResource as _,
+    MTLSize, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 use rustc_hash::FxHasher;
 use std::{collections::HashSet, hash::BuildHasherDefault, ptr::NonNull};
@@ -46,6 +47,7 @@ impl InnerAtlas {
         let texture = device
             .newTextureWithDescriptor(&descriptor)
             .expect("Failed to create texture");
+        texture.setLabel(Some(ns_string!("Metalglyph Atlas")));
 
         let glyph_cache = LruCache::unbounded_with_hasher(Hasher::default());
         let glyphs_in_use = HashSet::with_hasher(Hasher::default());
@@ -134,6 +136,7 @@ impl InnerAtlas {
         self.texture = device
             .newTextureWithDescriptor(&descriptor)
             .expect("Failed to create texture");
+        self.texture.setLabel(Some(ns_string!("Metalglyph Atlas")));
 
         // Re-upload glyphs
         for (&cache_key, glyph) in &self.glyph_cache {

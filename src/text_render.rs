@@ -5,9 +5,10 @@ use crate::{
 };
 use cosmic_text::{Color, SubpixelBin};
 use objc2::{rc::Retained, runtime::ProtocolObject};
+use objc2_foundation::ns_string;
 use objc2_metal::{
     MTLBuffer, MTLDevice, MTLOrigin, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder,
-    MTLRenderPipelineState, MTLResourceOptions, MTLSize, MTLTexture as _,
+    MTLRenderPipelineState, MTLResource as _, MTLResourceOptions, MTLSize, MTLTexture as _,
 };
 use std::{ptr::NonNull, slice};
 
@@ -38,6 +39,7 @@ impl TextRenderer {
                 MTLResourceOptions::StorageModeShared,
             )
             .unwrap();
+        vertex_buffer.setLabel(Some(ns_string!("Metalglyph Vertex Buffer")));
 
         let pipeline = atlas.get_or_create_pipeline(&device, sample_count);
 
@@ -315,6 +317,7 @@ impl TextRenderer {
             }
         } else {
             let (buffer, buffer_size) = create_oversized_buffer(device, vertices_raw);
+            buffer.setLabel(Some(ns_string!("Metalglyph Vertex Buffer")));
             self.vertex_buffer = buffer;
             self.vertex_buffer_size = buffer_size;
         }

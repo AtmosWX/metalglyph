@@ -1,6 +1,7 @@
 use crate::{Params, Resolution};
 use objc2::{rc::Retained, runtime::ProtocolObject};
-use objc2_metal::{MTLBuffer, MTLDevice, MTLResourceOptions};
+use objc2_foundation::ns_string;
+use objc2_metal::{MTLBuffer, MTLDevice, MTLResource as _, MTLResourceOptions};
 use std::{mem, ptr::NonNull};
 
 /// Controls the visible area of all text for a given renderer. Any text outside of the visible
@@ -31,6 +32,7 @@ impl Viewport {
                 MTLResourceOptions::StorageModeShared,
             )
             .unwrap();
+        buffer.setLabel(Some(ns_string!("Metalglyph Viewport Buffer")));
 
         Self { params, buffer }
     }
