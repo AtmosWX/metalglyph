@@ -35,11 +35,12 @@ impl Cache {
         library.setLabel(Some(ns_string!("Metalglyph - Shader Library")));
 
         let descriptor = MTLRenderPipelineDescriptor::new();
+        descriptor.setLabel(Some(ns_string!("Metalglyph - Pipeline State")));
 
-        let vertex_function = library.newFunctionWithName(ns_string!("vs_main"));
+        let vertex_function = library.newFunctionWithName(ns_string!("vertex_main"));
         descriptor.setVertexFunction(vertex_function.as_deref());
 
-        let fragment_function = library.newFunctionWithName(ns_string!("fs_main"));
+        let fragment_function = library.newFunctionWithName(ns_string!("fragment_main"));
         descriptor.setFragmentFunction(fragment_function.as_deref());
 
         let attachment = unsafe { descriptor.colorAttachments().objectAtIndexedSubscript(0) };

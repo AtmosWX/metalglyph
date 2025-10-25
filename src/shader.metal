@@ -29,7 +29,7 @@ float srgb_to_linear(float c) {
     }
 }
 
-vertex VertexOutput vs_main(
+vertex VertexOutput vertex_main(
     uint vertex_idx [[vertex_id]],
     uint instance_idx [[instance_id]],
     constant Params& params [[buffer(0)]],
@@ -93,7 +93,7 @@ vertex VertexOutput vs_main(
     return vert_output;
 }
 
-fragment float4 fs_main(
+fragment float4 fragment_main(
     VertexOutput in_frag [[stage_in]],
     texture2d<float> color_atlas_texture [[texture(0)]],
     texture2d<float> mask_atlas_texture [[texture(1)]]
