@@ -20,6 +20,7 @@ struct Inner {
     cache: Mutex<
         Vec<(
             MTLPixelFormat,
+            usize,
             Retained<ProtocolObject<dyn MTLRenderPipelineState>>,
         )>,
     >,
@@ -59,6 +60,7 @@ impl Cache {
         &self,
         device: &Retained<ProtocolObject<dyn MTLDevice>>,
         format: MTLPixelFormat,
+        sample_count: usize,
     ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
         let Inner {
             pipeline_descriptor,
@@ -70,9 +72,11 @@ impl Cache {
 
         cache
             .iter()
-            .find(|(fmt, _)| fmt == &format)
-            .map(|(_, p)| p.clone())
+            .find(|(fmt, count, _)| fmt == &format && count == &sample_count)
+            .map(|(_, _, p)| p.clone())
             .unwrap_or_else(|| {
+                pipeline_descriptor.setRasterSampleCount(sample_count);
+
                 let attachment = unsafe {
                     pipeline_descriptor
                         .colorAttachments()
@@ -85,7 +89,7 @@ impl Cache {
                     .newRenderPipelineStateWithDescriptor_error(&pipeline_descriptor)
                     .expect("Failed to create pipeline state");
 
-                cache.push((format, pipeline.clone()));
+                cache.push((format, sample_count, pipeline.clone()));
 
                 pipeline
             })

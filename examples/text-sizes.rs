@@ -93,7 +93,7 @@ impl WindowState {
         let cache = Cache::new(&device);
         let viewport = Viewport::new(&device);
         let mut atlas = TextAtlas::new(&device, &cache, MTLPixelFormat::BGRA8Unorm);
-        let text_renderer = TextRenderer::new(&mut atlas, &device);
+        let text_renderer = TextRenderer::new(&mut atlas, &device, 1);
 
         view.setWantsLayer(true);
         view.setLayer(Some(&surface));

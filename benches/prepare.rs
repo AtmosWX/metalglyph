@@ -24,7 +24,7 @@ fn run_bench(ctx: &mut Criterion) {
         MTLPixelFormat::BGRA8Unorm,
         ColorMode::Web,
     );
-    let mut text_renderer = TextRenderer::new(&mut atlas, &state.device);
+    let mut text_renderer = TextRenderer::new(&mut atlas, &state.device, 1);
 
     let attrs = Attrs::new()
         .family(Family::SansSerif)

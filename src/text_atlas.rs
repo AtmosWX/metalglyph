@@ -356,9 +356,10 @@ impl TextAtlas {
     pub(crate) fn get_or_create_pipeline(
         &self,
         device: &Retained<ProtocolObject<dyn MTLDevice>>,
-        // multisample: MultisampleState,
+        sample_count: usize,
         // depth_stencil: Option<DepthStencilState>,
     ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
-        self.cache.get_or_create_pipeline(device, self.format)
+        self.cache
+            .get_or_create_pipeline(device, self.format, sample_count)
     }
 }

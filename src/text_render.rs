@@ -22,12 +22,12 @@ pub struct TextRenderer {
 }
 
 impl TextRenderer {
-    // TODO: Accept multisample and depth_stencil states.
+    // TODO: Accept depth_stencil states.
     /// Creates a new `TextRenderer`.
     pub fn new(
         atlas: &mut TextAtlas,
         device: &Retained<ProtocolObject<dyn MTLDevice>>,
-        // multisample: MultisampleState,
+        sample_count: usize,
         // depth_stencil: Option<DepthStencilState>,
     ) -> Self {
         let vertex_buffer_size = next_copy_buffer_size(4096);
@@ -39,7 +39,7 @@ impl TextRenderer {
             )
             .unwrap();
 
-        let pipeline = atlas.get_or_create_pipeline(&device);
+        let pipeline = atlas.get_or_create_pipeline(&device, sample_count);
 
         Self {
             vertex_buffer,
