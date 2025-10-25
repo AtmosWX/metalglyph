@@ -32,9 +32,9 @@ impl Cache {
         let library = device
             .newLibraryWithSource_options_error(ns_string!(include_str!("./shader.metal")), None)
             .expect("Failed to create shader library.");
+        library.setLabel(Some(ns_string!("Metalglyph - Shader Library")));
 
         let descriptor = MTLRenderPipelineDescriptor::new();
-        descriptor.setLabel(Some(ns_string!("Metalglyph Pipeline Descriptor")));
 
         let vertex_function = library.newFunctionWithName(ns_string!("vs_main"));
         descriptor.setVertexFunction(vertex_function.as_deref());

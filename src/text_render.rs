@@ -39,7 +39,7 @@ impl TextRenderer {
                 MTLResourceOptions::StorageModeShared,
             )
             .unwrap();
-        vertex_buffer.setLabel(Some(ns_string!("Metalglyph Vertex Buffer")));
+        vertex_buffer.setLabel(Some(ns_string!("Metalglyph - Vertex Buffer")));
 
         let pipeline = atlas.get_or_create_pipeline(&device, sample_count);
 
@@ -317,7 +317,7 @@ impl TextRenderer {
             }
         } else {
             let (buffer, buffer_size) = create_oversized_buffer(device, vertices_raw);
-            buffer.setLabel(Some(ns_string!("Metalglyph Vertex Buffer")));
+            buffer.setLabel(Some(ns_string!("Metalglyph - Vertex Buffer")));
             self.vertex_buffer = buffer;
             self.vertex_buffer_size = buffer_size;
         }

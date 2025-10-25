@@ -47,7 +47,7 @@ impl InnerAtlas {
         let texture = device
             .newTextureWithDescriptor(&descriptor)
             .expect("Failed to create texture");
-        texture.setLabel(Some(ns_string!("Metalglyph Atlas")));
+        texture.setLabel(Some(ns_string!("Metalglyph - Atlas")));
 
         let glyph_cache = LruCache::unbounded_with_hasher(Hasher::default());
         let glyphs_in_use = HashSet::with_hasher(Hasher::default());
@@ -136,7 +136,8 @@ impl InnerAtlas {
         self.texture = device
             .newTextureWithDescriptor(&descriptor)
             .expect("Failed to create texture");
-        self.texture.setLabel(Some(ns_string!("Metalglyph Atlas")));
+        self.texture
+            .setLabel(Some(ns_string!("Metalglyph - Atlas")));
 
         // Re-upload glyphs
         for (&cache_key, glyph) in &self.glyph_cache {

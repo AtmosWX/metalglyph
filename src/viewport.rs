@@ -32,7 +32,7 @@ impl Viewport {
                 MTLResourceOptions::StorageModeShared,
             )
             .unwrap();
-        buffer.setLabel(Some(ns_string!("Metalglyph Viewport Buffer")));
+        buffer.setLabel(Some(ns_string!("Metalglyph - Viewport Buffer")));
 
         Self { params, buffer }
     }
