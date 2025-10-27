@@ -274,7 +274,7 @@ pub struct TextAtlas {
     cache: Cache,
     pub(crate) color_atlas: InnerAtlas,
     pub(crate) mask_atlas: InnerAtlas,
-    pub(crate) format: MTLPixelFormat,
+    pub(crate) pixel_format: MTLPixelFormat,
     pub(crate) color_mode: ColorMode,
 }
 
@@ -311,7 +311,7 @@ impl TextAtlas {
             cache: cache.clone(),
             color_atlas,
             mask_atlas,
-            format,
+            pixel_format: format,
             color_mode,
         }
     }
@@ -360,10 +360,10 @@ impl TextAtlas {
     pub(crate) fn get_or_create_pipeline(
         &self,
         device: &Retained<ProtocolObject<dyn MTLDevice>>,
+        depth_format: MTLPixelFormat,
         sample_count: usize,
-        // depth_stencil: Option<DepthStencilState>,
     ) -> Retained<ProtocolObject<dyn MTLRenderPipelineState>> {
         self.cache
-            .get_or_create_pipeline(device, self.format, sample_count)
+            .get_or_create_pipeline(device, self.pixel_format, depth_format, sample_count)
     }
 }

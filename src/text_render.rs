@@ -7,8 +7,9 @@ use cosmic_text::{Color, SubpixelBin};
 use objc2::{rc::Retained, runtime::ProtocolObject};
 use objc2_foundation::ns_string;
 use objc2_metal::{
-    MTLBuffer, MTLDevice, MTLOrigin, MTLPrimitiveType, MTLRegion, MTLRenderCommandEncoder,
-    MTLRenderPipelineState, MTLResource as _, MTLResourceOptions, MTLSize, MTLTexture as _,
+    MTLBuffer, MTLDevice, MTLOrigin, MTLPixelFormat, MTLPrimitiveType, MTLRegion,
+    MTLRenderCommandEncoder, MTLRenderPipelineState, MTLResource as _, MTLResourceOptions, MTLSize,
+    MTLTexture as _,
 };
 use std::{ptr::NonNull, slice};
 
@@ -23,13 +24,12 @@ pub struct TextRenderer {
 }
 
 impl TextRenderer {
-    // TODO: Accept depth_stencil states.
     /// Creates a new `TextRenderer`.
     pub fn new(
         atlas: &mut TextAtlas,
         device: &Retained<ProtocolObject<dyn MTLDevice>>,
+        depth_format: MTLPixelFormat,
         sample_count: usize,
-        // depth_stencil: Option<DepthStencilState>,
     ) -> Self {
         let vertex_buffer_size = next_copy_buffer_size(4096);
 
@@ -41,7 +41,7 @@ impl TextRenderer {
             .unwrap();
         vertex_buffer.setLabel(Some(ns_string!("Metalglyph - Vertex Buffer")));
 
-        let pipeline = atlas.get_or_create_pipeline(&device, sample_count);
+        let pipeline = atlas.get_or_create_pipeline(&device, depth_format, sample_count);
 
         Self {
             vertex_buffer,
